@@ -1,42 +1,47 @@
 import argparse
-from pathlib import Path
-
-import pandas as pd
-from sklearn.model_selection import train_test_split
-
+import os
+from datasets import load_from_disk
+from transformers import AutoTokenizer
 from src.config import Config
 
-
-def clean(df: pd.DataFrame, target: str) -> pd.DataFrame:
-    df = df.drop(columns=["customerID"], errors="ignore")
-    df["TotalCharges"] = pd.to_numeric(df["TotalCharges"], errors="coerce")
-    df[target] = df[target].map({"Yes": 1, "No": 0})
-    return df
-
-
-def main(config_path: str) -> None:
+def main(config_path):
+    # 1. Chargement de la config
     cfg = Config.from_yaml(config_path)
-
-    raw = pd.read_csv(cfg.data.raw_path)
-    raw = clean(raw, cfg.data.target)
-
-    train_df, test_df = train_test_split(
-        raw,
-        test_size=cfg.data.test_size,
-        random_state=cfg.data.seed,
-        stratify=raw[cfg.data.target],
-    )
-
-    Path(cfg.data.train_path).parent.mkdir(parents=True, exist_ok=True)
-    train_df.to_csv(cfg.data.train_path, index=False)
-    test_df.to_csv(cfg.data.test_path, index=False)
-
-    print(f"Train: {len(train_df)} rows -> {cfg.data.train_path}")
-    print(f"Test:  {len(test_df)} rows -> {cfg.data.test_path}")
-
+    raw_path = cfg.data["raw_path"]
+    processed_path = cfg.data["processed_path"]
+    model_name = cfg.model["name"]
+    max_length = cfg.model["max_length"]
+    
+    print(f"⚙️ Chargement des données brutes depuis {raw_path}...")
+    dataset = load_from_disk(raw_path)
+    
+    print(f"🔄 Initialisation du Tokenizer ({model_name})...")
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    
+    # 2. Fonction de tokenisation
+    def tokenize_function(examples):
+        # Le dataset dair-ai/emotion utilise la colonne 'text'
+        return tokenizer(
+            examples["text"], 
+            padding="max_length", 
+            truncation=True, 
+            max_length=max_length
+        )
+    
+    print("⏳ Tokenisation en cours (optimisée par lots)...")
+    # L'argument batched=True permet d'accélérer drastiquement le traitement
+    tokenized_datasets = dataset.map(tokenize_function, batched=True)
+    
+    # 3. Sauvegarde des données transformées
+    os.makedirs(processed_path, exist_ok=True)
+    print(f"💾 Sauvegarde des données tokenisées dans {processed_path}...")
+    tokenized_datasets.save_to_disk(processed_path)
+    
+    print("✅ Preprocessing (Tokenisation) terminé avec succès !")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/config.yaml")
     args = parser.parse_args()
+    
     main(args.config)

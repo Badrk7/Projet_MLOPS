@@ -1,26 +1,46 @@
-import mlflow.sklearn
-import pandas as pd
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from transformers import pipeline
 
-from src.config import Config
+# 1. Initialisation de l'API
+app = FastAPI(
+    title="API NLP - Émotions",
+    description="API MLOps pour la classification d'émotions avec DistilBERT",
+    version="1.0"
+)
 
-cfg = Config.from_yaml("configs/config.yaml")
-mlflow.set_tracking_uri(cfg.mlflow.tracking_uri)
+# 2. Chargement du modèle depuis le dossier local (généré par train.py)
+print("⏳ Chargement du modèle en mémoire...")
+try:
+    # Le pipeline gère automatiquement la tokenisation et l'inférence
+    classifier = pipeline("text-classification", model="models/distilbert-emotion")
+    print("✅ Modèle chargé avec succès !")
+except Exception as e:
+    print(f"❌ Erreur lors du chargement du modèle : {e}")
+    classifier = None
 
-model_uri = f"models:/{cfg.model.registry_name}@{cfg.model.alias}"
-model = mlflow.sklearn.load_model(model_uri)
+# 3. Format des données attendues par l'API
+class TextRequest(BaseModel):
+    text: str
 
-app = FastAPI(title="Telco Churn Prediction API")
-
-
-@app.get("/health")
-def health():
-    return {"status": "ok", "model": model_uri}
-
-
+# 4. Le point d'entrée pour les prédictions
 @app.post("/predict")
-def predict(payload: dict):
-    df = pd.DataFrame([payload])
-    prediction = int(model.predict(df)[0])
-    probability = float(model.predict_proba(df)[0, 1])
-    return {"churn": bool(prediction), "churn_probability": probability}
+def predict_emotion(request: TextRequest):
+    if classifier is None:
+        raise HTTPException(status_code=500, detail="Le modèle n'est pas chargé.")
+    
+    if not request.text.strip():
+        raise HTTPException(status_code=400, detail="Le texte ne peut pas être vide.")
+    
+    # Inférence
+    result = classifier(request.text)[0]
+    
+    return {
+        "label": result["label"],
+        "score": result["score"]
+    }
+
+# Optionnel : un point d'entrée pour vérifier que l'API est en ligne
+@app.get("/")
+def health_check():
+    return {"status": "ok", "model": "DistilBERT Emotion"}

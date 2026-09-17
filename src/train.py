@@ -1,67 +1,86 @@
 import argparse
-
-import mlflow
-import mlflow.sklearn
-import pandas as pd
-from mlflow import MlflowClient
-from sklearn.model_selection import GridSearchCV
-
+import os
+import numpy as np
+import evaluate
+from datasets import load_from_disk
+from transformers import (
+    AutoModelForSequenceClassification, 
+    TrainingArguments, 
+    Trainer, 
+    DataCollatorWithPadding, 
+    AutoTokenizer
+)
 from src.config import Config
-from src.pipeline import build_pipeline
-from src.utils import set_seed
 
+def compute_metrics(eval_pred):
+    """Calcule la précision (accuracy) à chaque époque"""
+    metric = evaluate.load("accuracy")
+    logits, labels = eval_pred
+    predictions = np.argmax(logits, axis=-1)
+    return metric.compute(predictions=predictions, references=labels)
 
-def main(config_path: str) -> None:
+def main(config_path):
     cfg = Config.from_yaml(config_path)
-    set_seed(cfg.data.seed)
+    processed_path = cfg.data["processed_path"]
+    model_name = cfg.model["name"]
+    num_labels = cfg.model["num_labels"]
+    output_dir = cfg.training["output_dir"]
+    
+    print(f"⚙️ Chargement des données tokenisées depuis {processed_path}...")
+    dataset = load_from_disk(processed_path)
+    
+    # Mapping des 6 émotions du dataset (tristesse, joie, amour, colère, peur, surprise)
+    emotions = ["Tristesse 😢", "Joie 😄", "Amour ❤️", "Colère 😡", "Peur 😨", "Surprise 😲"]
+    id2label = {i: label for i, label in enumerate(emotions)}
+    label2id = {label: i for i, label in enumerate(emotions)}
 
-    mlflow.set_tracking_uri(cfg.mlflow.tracking_uri)
-    mlflow.set_experiment(cfg.mlflow.experiment_name)
-    mlflow.sklearn.autolog(log_input_examples=True, log_model_signatures=True)
+    print(f"🤖 Initialisation de {model_name} pour la classification d'émotions...")
+    model = AutoModelForSequenceClassification.from_pretrained(
+        model_name, 
+        num_labels=num_labels,
+        id2label=id2label,
+        label2id=label2id
+    )
+    
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
-    train_df = pd.read_csv(cfg.data.train_path)
-    X = train_df.drop(columns=[cfg.data.target])
-    y = train_df[cfg.data.target]
-
-    model_type = cfg.model.type
-    pipeline = build_pipeline(cfg.features.numeric, cfg.features.categorical, model_type)
-    param_grid = getattr(cfg.training.param_grid, model_type)
-
-    search = GridSearchCV(
-        pipeline,
-        param_grid=vars(param_grid),
-        cv=cfg.training.cv_folds,
-        scoring=cfg.training.scoring,
-        n_jobs=-1,
+    # Paramètres d'entraînement
+    training_args = TrainingArguments(
+        output_dir=output_dir,
+        eval_strategy="epoch",
+        save_strategy="epoch",
+        learning_rate=cfg.training["learning_rate"],
+        per_device_train_batch_size=cfg.training["batch_size"],
+        per_device_eval_batch_size=cfg.training["batch_size"],
+        num_train_epochs=cfg.training["epochs"],
+        weight_decay=0.01,
+        load_best_model_at_end=True,
     )
 
-    with mlflow.start_run(run_name=f"{model_type}-gridsearch"):
-        search.fit(X, y)
-        mlflow.log_param("model_type", model_type)
-        mlflow.log_metric("best_cv_score", search.best_score_)
-        print(f"Best params: {search.best_params_}")
-        print(f"Best CV {cfg.training.scoring}: {search.best_score_:.4f}")
+    dataset["train"] = dataset["train"].shuffle(seed=42).select(range(100))
+    dataset["validation"] = dataset["validation"].shuffle(seed=42).select(range(20))
 
-        # RandomForest's tree storage isn't skops-trusted by default; we trained this
-        # model ourselves in this run, so it's safe to explicitly trust it.
-        model_info = mlflow.sklearn.log_model(
-            search.best_estimator_,
-            name="best_estimator",
-            skops_trusted_types=["sklearn.tree._tree.Tree", "numpy.dtype"],
-        )
-        registered = mlflow.register_model(model_info.model_uri, cfg.model.registry_name)
-
-    client = MlflowClient()
-    client.set_registered_model_alias(
-        name=cfg.model.registry_name,
-        alias=cfg.model.alias,
-        version=registered.version,
+    print("🚀 Lancement de l'entraînement (Trainer Hugging Face)...")
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=dataset["train"],
+        eval_dataset=dataset["validation"],
+        data_collator=data_collator,
+        compute_metrics=compute_metrics,
+        processing_class=tokenizer,  # <-- Le nouveau nom du paramètre !
     )
-    print(f"Registered {cfg.model.registry_name} v{registered.version} -> alias @{cfg.model.alias}")
 
+    trainer.train()
+
+    print(f"💾 Sauvegarde du modèle final (prêt pour l'API) dans {output_dir}...")
+    trainer.save_model(output_dir)
+    print("✅ Entraînement terminé avec succès !")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/config.yaml")
     args = parser.parse_args()
+    
     main(args.config)

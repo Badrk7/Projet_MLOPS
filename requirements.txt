@@ -1,12 +1,14 @@
-pandas
-numpy
+# Machine Learning & NLP
+torch
+transformers
+datasets
+evaluate
+accelerate
 scikit-learn
-mlflow
-requests
+
+# MLOps & API
 pyyaml
-matplotlib
 fastapi
-uvicorn[standard]
+uvicorn
 streamlit
-pytest
-ruff
+requests
