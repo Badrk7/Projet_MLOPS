@@ -58,8 +58,8 @@ def main(config_path):
         load_best_model_at_end=True,
     )
 
-    dataset["train"] = dataset["train"].shuffle(seed=42).select(range(100))
-    dataset["validation"] = dataset["validation"].shuffle(seed=42).select(range(20))
+    # dataset["train"] = dataset["train"].shuffle(seed=42).select(range(100))
+    # dataset["validation"] = dataset["validation"].shuffle(seed=42).select(range(20))
 
     print("🚀 Lancement de l'entraînement (Trainer Hugging Face)...")
     trainer = Trainer(
