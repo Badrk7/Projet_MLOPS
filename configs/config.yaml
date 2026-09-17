@@ -1,0 +1,20 @@
+project: "distilbert-emotion-mlops"
+
+data:
+  dataset_name: "dair-ai/emotion"
+  raw_path: "data/raw"
+  processed_path: "data/processed"
+
+model:
+  name: "distilbert-base-uncased"
+  num_labels: 6
+  max_length: 128
+
+training:
+  epochs: 3
+  batch_size: 16
+  learning_rate: 2.0e-5
+  output_dir: "models/distilbert-emotion"
+
+app:
+  api_url: "http://localhost:8000"

@@ -1,0 +1,35 @@
+# Environnements virtuels
+.venv/
+venv/
+env/
+
+# Fichiers temporaires et cache Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Variables d'environnement et secrets
+.env
+# (Note : .env.example doit être versionné, donc on ne le met pas ici)
+
+# Données (Ne jamais pusher les datasets !)
+data/raw/
+data/processed/
+*.csv
+*.parquet
+
+# Modèles et poids Hugging Face (Trop lourds pour Git)
+models/
+*.safetensors
+*.bin
+*.onnx
+*.pt
+*.h5
+
+# MLOps (MLflow)
+mlruns/
+mlflow.db
+
+# Fichiers de l'OS et de l'éditeur (VS Code)
+.vscode/
+.DS_Store
